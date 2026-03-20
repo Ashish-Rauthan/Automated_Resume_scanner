@@ -1,0 +1,123 @@
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+nosetests.xml
+*.cover
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# ── Environment & secrets ─────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+secrets.json
+
+# ── Database ──────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+test_integration.db
+
+# ── Alembic ───────────────────────────────────────────────────
+# Keep migrations but ignore generated temp files
+alembic/versions/__pycache__/
+
+# ── ML models & large data files ─────────────────────────────
+# sentence-transformers cache (downloaded automatically)
+*.bin
+*.safetensors
+*.onnx
+*.pt
+*.pth
+.cache/
+~/.cache/huggingface/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+logs/
+*.out
+
+# ── Node.js / Frontend ────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Vite build output
+dist/
+dist-ssr/
+*.local
+
+# Frontend env (keep example, ignore real)
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# ── OS files ──────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# ── Editor & IDE ──────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ── Docker ────────────────────────────────────────────────────
+.docker/
+
+# ── Temporary files ───────────────────────────────────────────
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
