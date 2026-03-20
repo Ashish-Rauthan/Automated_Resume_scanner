@@ -1,69 +1,52 @@
 """
-jd_extractor.py — UNIVERSAL VERSION (works for every department)
+jd_extractor.py
+---------------
+Job Description skill extraction using Groq LLM.
+
+Why LLM instead of rule-based?
+  - Handles ANY job domain (tech, finance, healthcare, marketing, etc.)
+  - Extracts implicit skills ("build scalable APIs" -> FastAPI, REST, Python)
+  - Understands context — doesn't confuse "Python" (language) with generic words
+  - No need to maintain a 300-entry master skills list
+
+Architecture:
+  extract_jd_skills()   -> main public function, returns JDSkills
+  get_jd_skill_set()    -> convenience wrapper returning a normalised set
+  _call_groq_jd()       -> raw Groq API call with retry
+  _extract_json()       -> JSON extraction + sanitisation (same as parser.py)
+
+Error handling:
+  - LLM failure -> returns empty JDSkills (scoring returns 0 skill match)
+  - Never raises — always returns something usable
 """
 
+import json
 import re
+import time
 import logging
-from typing import Optional
 from dataclasses import dataclass, field
+from typing import Optional
 
-import spacy
-from spacy.language import Language
+from groq import Groq, RateLimitError, APIConnectionError, APIStatusError
+
+from database import get_settings
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
-_nlp: Optional[Language] = None
+# ── Groq client singleton ─────────────────────────────────────────────────────
+_groq_client: Optional[Groq] = None
 
-def _get_nlp() -> Language:
-    global _nlp
-    if _nlp is None:
-        _nlp = spacy.load("en_core_web_sm")
-    return _nlp
 
-# ── Master lists (tech + soft — spaCy catches everything else) ───────────────
-TECH_SKILLS_MASTER = {
-    "python", "java", "javascript", "c", "c++", "c#", "go", "rust", "php", "sql",
-    "aws", "azure", "gcp", "docker", "kubernetes", "react", "node.js", "mongodb",
-    "postgresql", "mysql", "rest", "api", "agile", "scrum", "devops",
-}
+def _get_groq_client() -> Groq:
+    global _groq_client
+    if _groq_client is None:
+        _groq_client = Groq(api_key=settings.GROQ_API_KEY)
+    return _groq_client
 
-SOFT_SKILLS_MASTER = {
-    "communication", "teamwork", "problem solving", "leadership", "analytical",
-    "adaptability", "creativity", "time management",
-}
 
-# ── Universal generic blocklist (never treat these as skills) ────────────────
-GENERIC_BLOCKLIST = {
-    "experience", "team", "work", "year", "knowledge", "ability", "skill",
-    "requirement", "candidate", "role", "position", "job", "company",
-    "opportunity", "benefit", "salary", "application", "employer", "employee",
-    "responsibility", "understanding", "familiarity", "proficiency", "background",
-    "environment", "solution", "project", "product", "system", "development",
-    "implementation", "integration", "design", "testing", "deployment",
-    "maintain", "build", "create", "advanced knowledge", "bachelor", "degree",
-    "master", "phd", "qualifications", "responsibilities", "requirements",
-    "key responsibilities", "basic qualifications", "preferred qualifications",
-    "developer", "information technology", "verifying", "troubleshooting",
-}
+# ── Output dataclass ──────────────────────────────────────────────────────────
 
-# ── Remove common section headers (works on any JD) ─────────────────────────
-def _remove_section_headers(text: str) -> str:
-    """Strip lines that look like headings (ALL CAPS, ends with :, short titles)."""
-    lines = text.splitlines()
-    cleaned = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        # Skip obvious headings
-        if (stripped.isupper() or
-            stripped.endswith(':') or
-            len(stripped.split()) <= 5 and stripped[0].isupper()):
-            continue
-        cleaned.append(line)
-    return "\n".join(cleaned)
-
-# ── Dataclass (unchanged) ────────────────────────────────────────────────────
 @dataclass
 class JDSkills:
     raw_text: str = ""
@@ -74,76 +57,239 @@ class JDSkills:
     education_requirements: list = field(default_factory=list)
     keywords: list = field(default_factory=list)
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-def _normalise(text: str) -> str:
-    return re.sub(r"\s+", " ", text.lower().strip())
 
-def _deduplicate(items: list) -> list:
-    seen = {}
-    for item in items:
-        key = _normalise(item)
-        if key not in seen and key not in GENERIC_BLOCKLIST and len(key.split()) <= 4:
-            seen[key] = item
-    return sorted(seen.values(), key=str.lower)
+# ── Prompt ────────────────────────────────────────────────────────────────────
 
-# ── Extraction strategies ────────────────────────────────────────────────────
-def _rule_based_extract(text: str) -> tuple:
-    norm = _normalise(text)
-    tech = [s.title() if " " in s else s for s in TECH_SKILLS_MASTER if re.search(r"\b" + re.escape(s) + r"\b", norm, re.IGNORECASE)]
-    soft = [s.title() for s in SOFT_SKILLS_MASTER if re.search(r"\b" + re.escape(s) + r"\b", norm, re.IGNORECASE)]
-    return tech, soft
+def _build_jd_prompt(jd_text: str) -> str:
+    return f"""You are an expert job description analyser. Extract structured requirements from the job description below.
 
-def _spacy_extract(text: str) -> list:
-    doc = _get_nlp()(text[:5000])
-    candidates = []
-    for chunk in doc.noun_chunks:
-        if chunk.root.is_stop:
+STRICT RULES:
+1. Return ONLY a valid JSON object — no explanation, no markdown, no code fences.
+2. Extract REAL skills/tools/technologies only — not generic words like "experience", "team", "role".
+3. tech_skills: programming languages, frameworks, libraries, databases, cloud platforms, DevOps tools, methodologies, protocols, APIs. Each as a SHORT string (e.g. "Python", "FastAPI", "AWS S3", "CI/CD", "REST APIs").
+4. soft_skills: communication, leadership, teamwork, problem-solving, mentoring, etc.
+5. experience_requirements: strings like "3+ years of Python", "2+ years backend development".
+6. education_requirements: strings like "Bachelor's in Computer Science", "B.Tech or equivalent".
+7. keywords: ALL meaningful domain terms that describe the role for semantic matching (broader than tech_skills — include things like "microservices", "API design", "cloud infrastructure", "data pipelines").
+8. Use [] for any empty field — never null.
+9. Deduplicate: never repeat the same item.
+10. Be EXHAUSTIVE for tech_skills — extract every single technology mentioned anywhere in the JD.
+11. NEVER extract section headings, generic phrases, or boilerplate like "Basic Qualifications", "Key Responsibilities", "Preferred Qualifications", "Bachelor's degree", "Developer", "Problem Solving", "Information Technology", "Adept", "Verifying", "Troubleshooting". Only concrete skills/tools.
+
+Return EXACTLY this JSON structure:
+{{
+  "tech_skills": ["Python", "FastAPI", "PostgreSQL", "Docker", "AWS", "REST APIs"],
+  "soft_skills": ["Communication", "Problem-solving", "Teamwork"],
+  "experience_requirements": ["4+ years of Python", "2+ years with REST APIs"],
+  "education_requirements": ["Bachelor's in Computer Science or equivalent"],
+  "keywords": ["backend", "microservices", "API design", "cloud infrastructure", "distributed systems"]
+}}
+
+JOB DESCRIPTION:
+---
+{jd_text[:4000]}
+---
+
+Return ONLY the JSON now:"""
+
+
+# ── JSON extraction ───────────────────────────────────────────────────────────
+
+def _strip_fences(text: str) -> str:
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+    return match.group(1).strip() if match else text.strip()
+
+
+def _find_json_object(text: str) -> Optional[str]:
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, char in enumerate(text[start:], start=start):
+        if escape_next:
+            escape_next = False
             continue
-        txt = " ".join(t.text for t in chunk if not t.is_stop and not t.is_punct).strip()
-        if 1 <= len(txt.split()) <= 4 and _normalise(txt) not in GENERIC_BLOCKLIST and not txt[0].isdigit():
-            candidates.append(txt)
-    return candidates
+        if char == "\\" and in_string:
+            escape_next = True
+            continue
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start: i + 1]
+    return None
 
-def _extract_experience_requirements(text: str) -> list:
-    pattern = re.compile(r"(\d+)\+?\s*(?:to\s*\d+)?\s*years?\s*(?:of\s*)?(?:experience\s*(?:in|with)?\s*)?([a-zA-Z][a-zA-Z0-9\s\./\+#-]{1,40})", re.IGNORECASE)
-    matches = pattern.findall(text)
-    results = [f"{years}+ years of {skill.strip()}" for years, skill in matches if skill.strip()]
-    return _deduplicate(results)
 
-def _extract_education_requirements(text: str) -> list:
-    pattern = re.compile(r"\b(bachelor['\s]*s?|master['\s]*s?|ph\.?d|b\.?tech|m\.?tech|b\.?e|m\.?e|b\.?sc|m\.?sc|mba)\b.*?(?:in|of)?\s*([a-zA-Z\s]{3,50})?", re.IGNORECASE)
-    matches = pattern.findall(text)
-    results = []
-    for degree, field in matches:
-        entry = degree.title()
-        if field.strip():
-            entry += f" in {field.strip().title()}"
-        results.append(entry)
-    return _deduplicate(results)[:5]
+def _extract_json(raw: str) -> Optional[dict]:
+    if not raw or not raw.strip():
+        return None
+    for candidate in [raw.strip(), _strip_fences(raw)]:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    for candidate in [raw.strip(), _strip_fences(raw)]:
+        json_str = _find_json_object(candidate)
+        if json_str:
+            try:
+                parsed = json.loads(json_str)
+                if isinstance(parsed, dict):
+                    logger.info("JD JSON extracted via brace matching.")
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+    logger.error("JD JSON extraction failed. Raw (first 300): %s", raw[:300])
+    return None
 
-# ── Public API ───────────────────────────────────────────────────────────────
+
+def _sanitize_list(value, min_len: int = 1, max_words: int = 8) -> list:
+    """Clean and deduplicate a list field from LLM output."""
+    if isinstance(value, str):
+        value = [item.strip() for item in re.split(r"[,\n]+", value)]
+    if not isinstance(value, list):
+        return []
+    cleaned = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, str):
+            item = str(item)
+        item = item.strip().lstrip("*-—•")
+        item = item.strip()
+        if len(item) < min_len:
+            continue
+        # Truncate overly long entries
+        words = item.split()
+        if len(words) > max_words:
+            item = " ".join(words[:max_words])
+        norm = item.lower().strip()
+        if norm not in seen:
+            seen.add(norm)
+            cleaned.append(item)
+    return cleaned
+
+
+# ── Groq API call ─────────────────────────────────────────────────────────────
+
+def _call_groq_jd(prompt: str) -> Optional[str]:
+    """Call Groq with retry on rate limit. Returns raw string or None."""
+    client = _get_groq_client()
+    max_retries = 3
+    base_delay = 2.0
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model=settings.GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=1024,
+                stream=False,
+            )
+            content = response.choices[0].message.content
+            logger.info(
+                "JD Groq call succeeded (attempt %d, tokens: %d)",
+                attempt,
+                response.usage.total_tokens if response.usage else 0,
+            )
+            return content
+
+        except RateLimitError:
+            wait = base_delay * (2 ** (attempt - 1))
+            logger.warning("JD Groq rate limit (attempt %d/%d), waiting %.1fs", attempt, max_retries, wait)
+            if attempt < max_retries:
+                time.sleep(wait)
+            else:
+                return None
+        except (APIConnectionError, APIStatusError) as e:
+            logger.error("JD Groq API error: %s", e)
+            return None
+        except Exception as e:
+            logger.exception("JD Groq unexpected error (attempt %d)", attempt)
+            if attempt < max_retries:
+                time.sleep(base_delay)
+            else:
+                return None
+
+    return None
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
 def extract_jd_skills(jd_text: str) -> JDSkills:
+    """
+    Extract skills and requirements from a Job Description using Groq LLM.
+
+    Args:
+        jd_text: Raw JD text (plain text, any industry/domain)
+
+    Returns:
+        JDSkills dataclass — always returns a valid object even on LLM failure.
+        On failure, all lists are empty (scorer returns 0 for skill match component).
+    """
     if not jd_text or not jd_text.strip():
+        logger.warning("Empty JD text provided to extract_jd_skills().")
         return JDSkills()
 
-    # Step 1: Remove section headers (this fixes ALL your garbage)
-    clean_text = _remove_section_headers(jd_text)
+    prompt = _build_jd_prompt(jd_text)
+    raw_response = _call_groq_jd(prompt)
 
-    jd_result = JDSkills(raw_text=jd_text)
+    if raw_response is None:
+        logger.error("JD LLM call failed — returning empty JDSkills.")
+        return JDSkills(raw_text=jd_text)
 
-    tech, soft = _rule_based_extract(clean_text)
-    spacy_cands = _spacy_extract(clean_text)
+    parsed = _extract_json(raw_response)
 
-    all_tech = _deduplicate(tech + spacy_cands)
-    all_soft = _deduplicate(soft)
+    if parsed is None:
+        logger.error("JD JSON parse failed — returning empty JDSkills.")
+        return JDSkills(raw_text=jd_text)
 
-    jd_result.tech_skills = all_tech
-    jd_result.soft_skills = all_soft
-    jd_result.all_skills = _deduplicate(all_tech + all_soft)
+    tech_skills = _sanitize_list(parsed.get("tech_skills", []),              min_len=1, max_words=5)
+    soft_skills = _sanitize_list(parsed.get("soft_skills", []),              min_len=2, max_words=5)
+    exp_reqs    = _sanitize_list(parsed.get("experience_requirements", []),  min_len=3, max_words=10)
+    edu_reqs    = _sanitize_list(parsed.get("education_requirements", []),   min_len=3, max_words=10)
+    keywords    = _sanitize_list(parsed.get("keywords", []),                 min_len=2, max_words=6)
 
-    jd_result.experience_requirements = _extract_experience_requirements(clean_text)
-    jd_result.education_requirements = _extract_education_requirements(clean_text)
-    jd_result.keywords = []  # you can re-add _extract_all_keywords if you use it
+    # all_skills = tech + soft, deduplicated
+    seen = set()
+    all_skills = []
+    for skill in tech_skills + soft_skills:
+        norm = skill.lower().strip()
+        if norm not in seen:
+            seen.add(norm)
+            all_skills.append(skill)
 
-    logger.info(f"✅ Universal JD extraction: {len(jd_result.all_skills)} clean skills")
-    return jd_result
+    result = JDSkills(
+        raw_text=jd_text,
+        tech_skills=tech_skills,
+        soft_skills=soft_skills,
+        all_skills=all_skills,
+        experience_requirements=exp_reqs,
+        education_requirements=edu_reqs,
+        keywords=keywords,
+    )
+
+    logger.info(
+        "JD LLM extraction: %d tech, %d soft, %d exp_req, %d edu_req, %d keywords",
+        len(tech_skills), len(soft_skills),
+        len(exp_reqs), len(edu_reqs), len(keywords),
+    )
+    return result
+
+
+def get_jd_skill_set(jd_text: str) -> set:
+    """
+    Convenience wrapper — returns normalised set of all JD skills.
+    Used by scorer.py for O(1) membership testing.
+    """
+    jd_skills = extract_jd_skills(jd_text)
+    return {s.lower().strip() for s in jd_skills.all_skills}

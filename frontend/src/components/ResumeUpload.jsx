@@ -1,26 +1,31 @@
 import React, { useRef, useState } from 'react'
 
-const MAX_SIZE_MB = 5
-const MAX_FILES   = 20
+const MAX_SIZE_MB   = 5
+const MAX_FILES     = 20
+const ALLOWED_EXTS  = ['.pdf', '.docx']
+const ACCEPT_ATTR   = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const FILE_ICONS    = { '.pdf': '📄', '.docx': '📝' }
+
+function getExt(filename) {
+  const dot = filename.lastIndexOf('.')
+  return dot !== -1 ? filename.slice(dot).toLowerCase() : ''
+}
 
 export default function ResumeUpload({ files, onChange }) {
-  const inputRef    = useRef(null)
+  const inputRef   = useRef(null)
   const [dragOver, setDragOver] = useState(false)
 
   const addFiles = (incoming) => {
     const valid = []
     const seen  = new Set(files.map((f) => f.name))
-
     for (const file of incoming) {
-      if (!file.name.toLowerCase().endsWith('.pdf')) continue
+      if (!ALLOWED_EXTS.includes(getExt(file.name))) continue
       if (file.size > MAX_SIZE_MB * 1024 * 1024) continue
       if (seen.has(file.name)) continue
       valid.push(file)
       seen.add(file.name)
     }
-
-    const combined = [...files, ...valid].slice(0, MAX_FILES)
-    onChange(combined)
+    onChange([...files, ...valid].slice(0, MAX_FILES))
   }
 
   const handleInputChange = (e) => {
@@ -56,15 +61,15 @@ export default function ResumeUpload({ files, onChange }) {
       >
         <div className="upload-icon">📄</div>
         <div className="upload-title">
-          {dragOver ? 'Drop PDFs here' : 'Click or drag PDF resumes here'}
+          {dragOver ? 'Drop resumes here' : 'Click or drag resumes here'}
         </div>
         <div className="upload-hint">
-          PDF only · Max {MAX_SIZE_MB}MB per file · Up to {MAX_FILES} resumes
+          PDF or DOCX · Max {MAX_SIZE_MB} MB per file · Up to {MAX_FILES} resumes
         </div>
         <input
           ref={inputRef}
           type="file"
-          accept=".pdf"
+          accept={ACCEPT_ATTR}
           multiple
           style={{ display: 'none' }}
           onChange={handleInputChange}
@@ -73,21 +78,29 @@ export default function ResumeUpload({ files, onChange }) {
 
       {files.length > 0 && (
         <div className="file-list">
-          {files.map((file) => (
-            <div key={file.name} className="file-item">
-              <div>
-                <div className="file-name">{file.name}</div>
-                <div className="file-size">{formatSize(file.size)}</div>
+          {files.map((file) => {
+            const ext = getExt(file.name)
+            return (
+              <div key={file.name} className="file-item">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>{FILE_ICONS[ext] || '📄'}</span>
+                  <div>
+                    <div className="file-name">{file.name}</div>
+                    <div className="file-size">
+                      {ext.toUpperCase().slice(1)} · {formatSize(file.size)}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="file-remove"
+                  onClick={(e) => { e.stopPropagation(); removeFile(file.name) }}
+                  title="Remove"
+                >
+                  ×
+                </button>
               </div>
-              <button
-                className="file-remove"
-                onClick={(e) => { e.stopPropagation(); removeFile(file.name) }}
-                title="Remove"
-              >
-                ×
-              </button>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
