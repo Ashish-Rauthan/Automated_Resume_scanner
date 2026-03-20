@@ -99,6 +99,43 @@ class ScreeningResultDB(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Project schemas ───────────────────────────────────────────────────────────
+
+class ProjectCreate(BaseModel):
+    """Request body for creating a new screening project."""
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = Field(default="", max_length=1000)
+
+
+class ProjectUpdate(BaseModel):
+    """Request body for renaming / updating a project."""
+    title: str = Field(min_length=1, max_length=255)
+    description: Optional[str] = Field(default="", max_length=1000)
+
+
+class ProjectResponse(BaseModel):
+    """Full project detail returned to the frontend."""
+    id: str
+    title: str
+    description: str
+    created_at: datetime
+    updated_at: datetime
+    candidate_count: int
+    top_score: Optional[float]
+    last_run: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class SessionSummary(BaseModel):
+    """Summary of one screening session inside a project."""
+    session_id: str
+    candidate_count: int
+    created_at: datetime
+    top_score: Optional[float]
+    jd_preview: str
+
+
 # ── Generic responses ─────────────────────────────────────────────────────────
 
 class MessageResponse(BaseModel):
