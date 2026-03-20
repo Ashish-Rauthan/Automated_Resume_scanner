@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     SKILL_MATCH_WEIGHT: float = 0.50
     SEMANTIC_WEIGHT: float = 0.50
+    PROJECT_WEIGHT: float = 0.30
 
     class Config:
         env_file = ".env"

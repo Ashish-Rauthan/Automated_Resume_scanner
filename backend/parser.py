@@ -48,56 +48,29 @@ def get_groq_client() -> Groq:
 # ── Prompt engineering ────────────────────────────────────────────────────────
 
 def _build_prompt(resume_text: str) -> str:
-    """
-    Build the system + user prompt for resume parsing.
-
-    Key prompt engineering decisions:
-    1. Explicit JSON schema in the prompt (not just "return JSON")
-    2. All fields specified with types and examples
-    3. "ONLY return the JSON object" — prevents preamble/postamble
-    4. Null-safe instructions — tell model to use [] not null
-    5. Name extraction heuristic — first line is usually the candidate name
-    """
-    return f"""You are an expert resume parser. Your only job is to extract structured information from resume text and return it as a valid JSON object.
+    return f"""You are an expert resume parser. Extract structured information and return ONLY a valid JSON object.
 
 STRICT RULES:
-1. Return ONLY a valid JSON object. No explanation, no markdown, no extra text.
-2. Do not wrap in ```json``` code blocks.
-3. Every array field must be a JSON array (use [] if empty, never null).
-4. Extract actual content — do not summarize or paraphrase skills/technologies.
-5. For the "name" field, extract the candidate's full name (usually the first line or heading).
+- Return ONLY JSON. No explanation, no ```json.
+- Skills: Extract EVERY technical skill, tool, technology, framework, cloud service, database, API, methodology from THE ENTIRE resume — especially from PROJECTS and EXPERIENCE sections (they are often hidden there).
+- Include brand names exactly as written (AWS, EC2, Node.js, REST APIs, MongoDB, JWT, PyQt6, etc.).
+- Projects & Experience: Keep key achievements and technologies used.
 
-Return this exact JSON structure:
+Return this exact JSON:
 {{
-  "name": "Full Name of candidate or null if not found",
-  "skills": ["skill1", "skill2", "skill3"],
-  "experience": [
-    "Job Title at Company Name (Year - Year): key responsibility or achievement",
-    "Job Title at Company Name (Year - Year): key responsibility or achievement"
-  ],
-  "projects": [
-    "Project Name: brief description including technologies used",
-    "Project Name: brief description including technologies used"
-  ],
-  "education": [
-    "Degree, Major - Institution Name (Year)",
-    "Certification Name - Issuing Body (Year)"
-  ]
+  "name": "Full Name or null",
+  "skills": ["Python", "AWS", "Node.js", "MongoDB", ...],   // ALL skills from everywhere
+  "experience": ["Full Stack Intern – WebArclight (Apr 2025 – Aug 2025): Designed relational databases..."],
+  "projects": ["Carbon Tracker: Architected automated workload migration across 13 AWS EC2 regions..."],
+  "education": ["B.Tech in Computer Science & Engineering – Graphic Era Hill University"]
 }}
-
-EXTRACTION GUIDELINES:
-- skills: Extract ALL technical skills, programming languages, frameworks, tools, databases, cloud platforms, methodologies. Each skill as a short string (e.g. "Python", "React", "AWS S3", "Agile").
-- experience: Each job as ONE string. Include title, company, dates, and 1-2 key achievements.
-- projects: Each project as ONE string. Include name, tech stack, and purpose.
-- education: Each degree/certification as ONE string.
-- name: Look for a prominent name at the top of the resume. Return null if unclear.
 
 RESUME TEXT:
 ---
 {resume_text[:6000]}
 ---
 
-Return ONLY the JSON object now:"""
+Return ONLY the JSON now:"""
 
 
 # ── JSON extraction + repair ──────────────────────────────────────────────────
