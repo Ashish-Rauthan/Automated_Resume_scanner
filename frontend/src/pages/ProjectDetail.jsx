@@ -17,8 +17,8 @@ function formatDate(dt) {
 
 // ── Edit project modal ────────────────────────────────────────
 function EditModal({ project, onClose, onSave }) {
-  const [title, setTitle]   = useState(project.title)
-  const [desc,  setDesc]    = useState(project.description || '')
+  const [title, setTitle]     = useState(project.title)
+  const [desc,  setDesc]      = useState(project.description || '')
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
 
@@ -51,12 +51,22 @@ function EditModal({ project, onClose, onSave }) {
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="field">
             <label className="label">Title *</label>
-            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus required />
+            <input
+              className="input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+              required
+            />
           </div>
           <div className="field">
             <label className="label">Description</label>
-            <textarea className="input" value={desc} onChange={(e) => setDesc(e.target.value)}
-              style={{ minHeight: 72, resize: 'vertical' }} />
+            <textarea
+              className="input"
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              style={{ minHeight: 72, resize: 'vertical' }}
+            />
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
@@ -70,101 +80,12 @@ function EditModal({ project, onClose, onSave }) {
   )
 }
 
-// ── Session card (collapsible) ────────────────────────────────
-function SessionCard({ session, projectId }) {
-  const [open,    setOpen]    = useState(false)
-  const [results, setResults] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const navigate = useNavigate()
-
-  const load = async () => {
-    if (results !== null) { setOpen((o) => !o); return }
-    setLoading(true)
-    try {
-      const { data } = await api.get(`/screen/export/${session.session_id}`, {
-        responseType: 'text',
-      })
-    } catch {}
-    // Fetch actual result objects via re-screening view
-    // We'll get them from the session detail approach
-    try {
-      const { data } = await api.get(`/projects/${projectId}/sessions`)
-      // Results come from the project screening endpoint; use local state approach
-    } catch {}
-    setLoading(false)
-    setOpen(true)
-  }
-
-  const downloadCSV = async (e) => {
-    e.stopPropagation()
-    const token = localStorage.getItem('access_token')
-    const res = await fetch(`${BASE_URL}/screen/export/${session.session_id}`,
-      { headers: { Authorization: `Bearer ${token}` } })
-    const blob = await res.blob()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `session_${session.session_id.slice(0, 8)}.csv`
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
-
-  const recStr = session.top_score != null
-    ? (session.top_score >= 70 ? 'Strong Fit' : session.top_score >= 45 ? 'Moderate Fit' : 'Not a Fit')
-    : null
-
-  const badgeCls = recStr === 'Strong Fit' ? 'badge-green' : recStr === 'Moderate Fit' ? 'badge-amber' : 'badge-red'
-
-  return (
-    <div className="card" style={{ overflow: 'hidden' }}>
-      <div
-        style={{ padding: '16px 20px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <div style={{
-          fontSize: 13, transform: open ? 'rotate(90deg)' : 'rotate(0)',
-          transition: 'transform 200ms', color: 'var(--ink-muted)',
-        }}>▶</div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>
-            {formatDate(session.created_at)}
-          </div>
-          {session.jd_preview && (
-            <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {session.jd_preview}{session.jd_preview.length >= 120 ? '…' : ''}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
-          <span className="badge badge-blue">{session.candidate_count} candidates</span>
-          {recStr && <span className={`badge ${badgeCls}`}>Top: {session.top_score?.toFixed(1)}</span>}
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={downloadCSV}
-            title="Download CSV"
-          >
-            ↓ CSV
-          </button>
-        </div>
-      </div>
-
-      {open && (
-        <SessionResults sessionId={session.session_id} />
-      )}
-    </div>
-  )
-}
-
+// ── Session results (lazy loaded) ─────────────────────────────
 function SessionResults({ sessionId }) {
-  const [rows, setRows]     = useState(null)
+  const [rows,    setRows]    = useState(null)
   const [loading, setLoading] = useState(true)
-  const [expanded, setExpanded] = useState(null)
 
   useEffect(() => {
-    // Re-fetch from DB via a dedicated endpoint
     api.get(`/session/${sessionId}/results`)
       .then(({ data }) => setRows(data.results || []))
       .catch(() => setRows([]))
@@ -178,8 +99,12 @@ function SessionResults({ sessionId }) {
   )
 
   if (!rows || rows.length === 0) return (
-    <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)',
-      fontSize: 13, color: 'var(--ink-muted)' }}>
+    <div style={{
+      padding: '16px 20px',
+      borderTop: '1px solid var(--border)',
+      fontSize: 13,
+      color: 'var(--ink-muted)',
+    }}>
       No results found for this session.
     </div>
   )
@@ -191,11 +116,87 @@ function SessionResults({ sessionId }) {
   )
 }
 
+// ── Session card (collapsible) ────────────────────────────────
+function SessionCard({ session, projectId }) {
+  const [open, setOpen] = useState(false)
+
+  const downloadCSV = async (e) => {
+    e.stopPropagation()
+    const token = localStorage.getItem('access_token')
+    const res = await fetch(
+      `${BASE_URL}/screen/export/${session.session_id}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `session_${session.session_id.slice(0, 8)}.csv`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  const recStr = session.top_score != null
+    ? (session.top_score >= 70 ? 'Strong Fit' : session.top_score >= 45 ? 'Moderate Fit' : 'Not a Fit')
+    : null
+  const badgeCls = recStr === 'Strong Fit' ? 'badge-green' : recStr === 'Moderate Fit' ? 'badge-amber' : 'badge-red'
+
+  return (
+    <div className="card" style={{ overflow: 'hidden' }}>
+      <div
+        style={{
+          padding: '16px 20px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <div style={{
+          fontSize: 13,
+          transform: open ? 'rotate(90deg)' : 'rotate(0)',
+          transition: 'transform 200ms',
+          color: 'var(--ink-muted)',
+        }}>
+          ▶
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>
+            {formatDate(session.created_at)}
+          </div>
+          {session.jd_preview && (
+            <div style={{
+              fontSize: 12, color: 'var(--ink-muted)', marginTop: 2,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {session.jd_preview}{session.jd_preview.length >= 120 ? '…' : ''}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexShrink: 0 }}>
+          <span className="badge badge-blue">{session.candidate_count} candidates</span>
+          {recStr && (
+            <span className={`badge ${badgeCls}`}>Top: {session.top_score?.toFixed(1)}</span>
+          )}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={downloadCSV}
+            title="Download CSV"
+          >
+            ↓ CSV
+          </button>
+        </div>
+      </div>
+
+      {open && <SessionResults sessionId={session.session_id} />}
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────
 export default function ProjectDetail() {
   const { projectId } = useParams()
-  const navigate = useNavigate()
-  const { user } = useAuth()
+  const navigate      = useNavigate()
+  const { user }      = useAuth()
 
   const [project,  setProject]  = useState(null)
   const [sessions, setSessions] = useState([])
@@ -203,11 +204,11 @@ export default function ProjectDetail() {
   const [error,    setError]    = useState('')
   const [showEdit, setShowEdit] = useState(false)
 
-  // screening form
-  const [jd,       setJd]       = useState('')
-  const [files,    setFiles]     = useState([])
-  const [screening, setScreening] = useState(false)
-  const [screenErr, setScreenErr] = useState('')
+  // Screening form state
+  const [jd,            setJd]            = useState('')
+  const [files,         setFiles]         = useState([])
+  const [screening,     setScreening]     = useState(false)
+  const [screenErr,     setScreenErr]     = useState('')
   const [latestResults, setLatestResults] = useState(null)
   const [latestSession, setLatestSession] = useState('')
 
@@ -229,10 +230,12 @@ export default function ProjectDetail() {
     e.preventDefault()
     setScreenErr('')
     if (!jd.trim() || jd.trim().length < 50) {
-      setScreenErr('Job description must be at least 50 characters.'); return
+      setScreenErr('Job description must be at least 50 characters.')
+      return
     }
     if (!files.length) {
-      setScreenErr('Please upload at least one resume.'); return
+      setScreenErr('Please upload at least one resume.')
+      return
     }
     setScreening(true)
     setLatestResults(null)
@@ -240,11 +243,13 @@ export default function ProjectDetail() {
       const formData = new FormData()
       formData.append('job_description', jd)
       files.forEach((f) => formData.append('files', f))
-      const { data } = await api.post(`/projects/${projectId}/screen`, formData,
-        { headers: { 'Content-Type': 'multipart/form-data' } })
+      const { data } = await api.post(
+        `/projects/${projectId}/screen`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      )
       setLatestResults(data.results || [])
       setLatestSession(data.session_id || '')
-      // Reload sessions list
       await loadProject()
       setJd('')
       setFiles([])
@@ -270,41 +275,88 @@ export default function ProjectDetail() {
       })
   }
 
+  // ── Back button style ───────────────────────────────────────
+  const backBtnStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    color: 'var(--ink-muted)',
+    padding: '6px 10px',
+    borderRadius: 'var(--radius)',
+    border: '1px solid var(--border)',
+    background: '#fff',
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: 'pointer',
+    transition: 'background 150ms, color 150ms',
+  }
+
+  // ── Loading state ───────────────────────────────────────────
   if (loading) return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="topbar-logo"><div className="topbar-logo-dot" />Resume AI</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={backBtnStyle}
+            onClick={() => navigate('/projects')}
+          >
+            ← Back
+          </button>
+          <div className="topbar-logo">
+            <div className="topbar-logo-dot" />Resume AI
+          </div>
+        </div>
       </header>
       <main className="page-body">
-        {[1,2,3].map((i) => <div key={i} className="skeleton" style={{ height: 60, marginBottom: 12 }} />)}
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="skeleton" style={{ height: 60, marginBottom: 12 }} />
+        ))}
       </main>
     </div>
   )
 
   return (
     <div className="app-shell">
+
+      {/* ── Topbar ─────────────────────────────────────────── */}
       <header className="topbar">
-        <div className="topbar-logo">
-          <div className="topbar-logo-dot" />Resume AI
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={backBtnStyle}
+            onClick={() => navigate('/projects')}
+          >
+            ← Back
+          </button>
+          <div className="topbar-logo">
+            <div className="topbar-logo-dot" />Resume AI
+          </div>
         </div>
         <div className="topbar-right">
           <span className="topbar-email">{user?.email}</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => navigate('/projects')}>
-            ← All projects
-          </button>
         </div>
       </header>
 
       <main className="page-body">
-        {error && <div className="alert alert-error" style={{ marginBottom: 24 }}>{error}</div>}
 
-        {/* Project header */}
+        {error && (
+          <div className="alert alert-error" style={{ marginBottom: 24 }}>{error}</div>
+        )}
+
+        {/* ── Project header ──────────────────────────────── */}
         {project && (
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 32, flexWrap: 'wrap', gap: 12 }}>
+          <div style={{
+            display: 'flex', alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            marginBottom: 32, flexWrap: 'wrap', gap: 12,
+          }}>
             <div>
               <h1 className="page-title">{project.title}</h1>
               {project.description && (
-                <p style={{ fontSize: 14, color: 'var(--ink-muted)', marginTop: 4 }}>{project.description}</p>
+                <p style={{ fontSize: 14, color: 'var(--ink-muted)', marginTop: 4 }}>
+                  {project.description}
+                </p>
               )}
             </div>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowEdit(true)}>
@@ -313,17 +365,24 @@ export default function ProjectDetail() {
           </div>
         )}
 
-        {/* ── New screening form ─────────────────────────────── */}
+        {/* ── New screening form ──────────────────────────── */}
         <div className="card" style={{ padding: 24, marginBottom: 32 }}>
-          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>Run a new screening</div>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>
+            Run a new screening
+          </div>
           <div style={{ fontSize: 13, color: 'var(--ink-muted)', marginBottom: 20 }}>
             Paste a JD and upload resumes — results are saved to this project.
           </div>
 
-          {screenErr && <div className="alert alert-error" style={{ marginBottom: 16 }}>{screenErr}</div>}
+          {screenErr && (
+            <div className="alert alert-error" style={{ marginBottom: 16 }}>{screenErr}</div>
+          )}
 
           <form onSubmit={handleScreen}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 16 }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr',
+              gap: 20, marginBottom: 16,
+            }}>
               <div>
                 <div className="label" style={{ marginBottom: 6 }}>Job Description</div>
                 <textarea
@@ -333,7 +392,10 @@ export default function ProjectDetail() {
                   value={jd}
                   onChange={(e) => { setJd(e.target.value); setScreenErr('') }}
                 />
-                <div style={{ fontSize: 11, color: 'var(--ink-faint)', textAlign: 'right', marginTop: 4 }}>
+                <div style={{
+                  fontSize: 11, color: 'var(--ink-faint)',
+                  textAlign: 'right', marginTop: 4,
+                }}>
                   {jd.length} chars
                 </div>
               </div>
@@ -352,16 +414,20 @@ export default function ProjectDetail() {
               >
                 {screening
                   ? <><span className="spinner" />Screening…</>
-                  : `Screen ${files.length || ''} Resume${files.length !== 1 ? 's' : ''}`}
+                  : `Screen ${files.length || ''} Resume${files.length !== 1 ? 's' : ''}`
+                }
               </button>
             </div>
           </form>
         </div>
 
-        {/* ── Latest results ─────────────────────────────────── */}
+        {/* ── Latest results ──────────────────────────────── */}
         {latestResults && latestResults.length > 0 && (
           <div className="animate-fadeUp" style={{ marginBottom: 32 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between', marginBottom: 16,
+            }}>
               <div style={{ fontSize: 15, fontWeight: 500 }}>
                 Latest results — {latestResults.length} candidate{latestResults.length > 1 ? 's' : ''}
               </div>
@@ -373,17 +439,26 @@ export default function ProjectDetail() {
           </div>
         )}
 
-        {/* ── Past sessions ──────────────────────────────────── */}
+        {/* ── Past sessions ────────────────────────────────── */}
         <div>
-          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 14, color: 'var(--ink)' }}>
+          <div style={{
+            fontSize: 15, fontWeight: 500,
+            marginBottom: 14, color: 'var(--ink)',
+          }}>
             Past screening sessions
-            <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--ink-muted)', marginLeft: 8 }}>
+            <span style={{
+              fontSize: 12, fontWeight: 400,
+              color: 'var(--ink-muted)', marginLeft: 8,
+            }}>
               ({sessions.length})
             </span>
           </div>
 
           {sessions.length === 0 ? (
-            <div style={{ padding: '32px 0', textAlign: 'center', color: 'var(--ink-muted)', fontSize: 14 }}>
+            <div style={{
+              padding: '32px 0', textAlign: 'center',
+              color: 'var(--ink-muted)', fontSize: 14,
+            }}>
               No past sessions yet — run your first screening above.
             </div>
           ) : (
@@ -394,8 +469,10 @@ export default function ProjectDetail() {
             </div>
           )}
         </div>
+
       </main>
 
+      {/* ── Edit modal ───────────────────────────────────────── */}
       {showEdit && project && (
         <EditModal
           project={project}
@@ -406,6 +483,7 @@ export default function ProjectDetail() {
           }}
         />
       )}
+
     </div>
   )
 }

@@ -48,7 +48,7 @@ export default function LoginPage() {
     const result = await login(formData.email, formData.password)
     setLoading(false)
     if (result.success) {
-      navigate('/dashboard')
+      navigate('/projects')
     } else {
       setApiErr(result.error)
     }
